@@ -1,0 +1,53 @@
+name: build-ru-macos
+
+# Собирает TrguiNG с русским слоем под Apple Silicon (.app) прямо в облаке GitHub.
+# Запуск: вкладка Actions -> "build-ru-macos" -> Run workflow.
+# Требование в репозитории: файл src/ru-overlay.ts должен присутствовать.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Проверка русского слоя
+        run: test -f src/ru-overlay.ts || (echo "Нет src/ru-overlay.ts — загрузи его в репозиторий"; exit 1)
+
+      - name: Вставка импорта русского слоя в index.tsx
+        run: |
+          if ! grep -q ru-overlay src/index.tsx; then
+            perl -0pi -e 's{(import "css/loader\.css";)}{$1\nimport { installRuLayer } from "./ru-overlay"; installRuLayer();}' src/index.tsx
+          fi
+          grep -n ru-overlay src/index.tsx
+
+      - name: Geoip база
+        run: curl -fL -o src-tauri/dbip.mmdb https://github.com/openscopeproject/TrguiNG/releases/latest/download/dbip.mmdb
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Rust target (arm64)
+        run: rustup target add aarch64-apple-darwin
+
+      - name: npm install
+        run: npm install --no-audit --no-fund
+
+      - name: Сборка .app
+        run: npx tauri build --target aarch64-apple-darwin --bundles app
+
+      - name: Упаковка .app (сохраняет права/симлинки)
+        run: |
+          cd src-tauri/target/aarch64-apple-darwin/release/bundle/macos
+          tar -czf "$GITHUB_WORKSPACE/TrguiNG-ru-macos-arm64.tar.gz" TrguiNG.app
+
+      - name: Загрузка артефакта
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrguiNG-ru-macos-arm64
+          path: TrguiNG-ru-macos-arm64.tar.gz
